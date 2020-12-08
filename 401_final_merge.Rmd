@@ -1,0 +1,197 @@
+---
+title: "Data Merging and Summary Statistics"
+author: "Abay, Anthony, Daniel, Quinton"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# ACLED Data
+
+We will begin by reading in the data from ACLED on armed conflicts during the Arab spring. This data will be cleaned and aggregated since the factors we are looking at are at the country level.
+
+```{r}
+all_countries = read.csv('all_countries.csv', stringsAsFactors =TRUE)
+
+#selecting just the necessary countries for the project since the website is too slow to query
+arab_spring = c('Libya', 'Egypt', 'Yemen', 'Syria', 'Bahrain', 'Morocco', 'Iraq','Algeria',
+                'Jordan', 'Kuwait', 'Oman', 'Sudan', 'Lebanon', 'Tunisia')
+
+protest_type = c('Riots', 'Protests', 'Violence against civilians', 'Explosions/Remote Violence')#reducing to the relevant types of protest
+all_protests = subset(all_countries, event_type %in% protest_type)
+
+countries = subset(all_protests, country %in% arab_spring)#creating the data.frame of the right countries
+countries$country = droplevels(countries$country)
+
+countries = subset(countries, select = c('event_date', 'year','event_type','country','location',
+                                         'latitude','longitude'))#non aggregated data with correct columns
+
+#write.csv(countries, 'countries.csv')
+
+#aggregating the data by country
+agg_countries = data.frame()
+relevant_years = c(2005, 2006, 2007, 2008, 2009, 2010,2011,2012)
+
+for (temp_country in unique(countries$country)){
+  for (years in relevant_years){
+    temp = subset(countries, country == temp_country & year== years)
+    total = nrow(temp)
+    riot_count = sum(temp$event_type=='Riots')
+    explosion_count = sum(temp$event_type=='Explosions/Remote violence')
+    protest_count = sum(temp$event_type=='Protests')
+    vac_count = sum(temp$event_type=='Violence against civilians')
+    temp_list = c(temp_country, years, total, riot_count, explosion_count, protest_count, vac_count)
+    agg_countries = rbind(agg_countries, temp_list) 
+  }
+}
+
+names(agg_countries) = c('country', 'year','total_events','riot_count', 'explosion_count', 'protest_count',
+                         'vac_count') #vac_count stands for violence against citizens
+
+#ordering the data to make binding easier
+pacman::p_load(plyr)
+agg_countries = arrange(agg_countries, country, year)
+
+#none of the countries we are looking at had any explosions
+agg_countries = subset(agg_countries, select = -c(explosion_count))
+
+#we also want our counts as integers
+agg_countries = transform(agg_countries, year = as.integer(year),total_events = as.integer(total_events), riot_count = as.numeric(riot_count), protest_count = as.integer(protest_count), 
+                          vac_count = as.integer(vac_count))#converting to appropriate data types
+```
+
+Next we will merge the datasets that contain the information on our factors.
+
+# CPI data
+
+```{r}
+arab_spring = unique(agg_countries$country)#resetting this vector since we only have data on 6 countries
+
+cpi_data = read.csv('CPI.csv', stringsAsFactors = TRUE)
+cpi_data = subset(cpi_data, select = c(country, score, rank, year))#the region won't be relevant to our analysis
+
+#subsetting the correct countries
+cpi_data = subset(cpi_data, country %in% arab_spring)
+cpi_data = arrange(cpi_data, country,year)
+cpi_data = subset(cpi_data, select = c(score, rank))#getting the new data to add
+
+#converting score to a numeric
+cpi_data = transform(cpi_data, score = as.numeric(score))
+
+agg_countries = cbind(agg_countries,cpi_data)#binding it to the existing dataframe
+```
+
+# Education Data
+The data that ranks a countries education levels is in a time series so we will need to do more wrangling with it.
+
+```{r}
+education = read.csv('Education.csv')
+education = subset(education, Country %in% arab_spring)#getting the relevant countries
+education = subset(education, select = c(HDI.Rank..2018., Country,X2005, X2006, X2007, X2008, X2009, X2010, X2011, X2012))#getting the relevant years
+
+#converting to numeric
+education = transform(education, X2005 = as.numeric(X2005),X2006 = as.numeric(X2006),X2007 = as.numeric(X2007), X2008 = as.numeric(X2008),X2009 = as.numeric(X2009), X2010 = as.numeric(X2010), X2011 = as.numeric(X2011), X2012 = as.numeric(X2012))
+
+names(education) = c("HDI_rank", "country","2005","2006","2007","2008","2009", "2010",'2011','2012')#renaming columns
+education = arrange(education, country)
+
+HDI_score = c()#this list will become the columns containting the hdi scores on education
+for (i in 1:nrow(education)){#need to run for every row
+  for (j in 3:10){#need to run for the last three columns which contain the data from the years
+    HDI_score = append(HDI_score, education[i,j])
+  }
+}
+agg_countries = cbind(agg_countries, HDI_score)
+```
+
+# GDP per Capita
+
+```{r}
+gdp = read.csv('GDP_per_capita.csv')
+arab_spring = append(arab_spring, 'Egypt, Arab Rep.')#Egypt is listed as "Egypt, arab rep." in the worldbank
+gdp = subset(gdp, Country.Name %in% c(arab_spring))#getting the relevant countries
+gdp = subset(gdp, select = c(Country.Name, X2005, X2006, X2007, X2008, X2009, X2010, X2011, X2012))#getting the relevant years
+
+GDP_per_capita = c()#this list will become the columns containting the hdi scores on education
+for (i in 1:nrow(gdp)){#need to run for every row
+  for (j in 2:9){#need to run for the last three columns which contain the data from the years
+    GDP_per_capita = append(GDP_per_capita, gdp[i,j])
+  }
+}
+agg_countries = cbind(agg_countries, GDP_per_capita)
+```
+
+# Unemployment
+
+```{r}
+unemployment = read.csv('unemployment.csv')
+unemployment = subset(unemployment, Country.Name %in% c(arab_spring))#getting the relevant countries
+unemployment = subset(unemployment, select = c(Country.Name, X2005, X2006, X2007, X2008, X2009, X2010, X2011, X2012))#getting the relevant years
+
+unemployment_percent = c()
+for (i in 1:nrow(gdp)){#need to run for every row
+  for (j in 2:9){#need to run for the last three columns which contain the data from the years
+    unemployment_percent = append(unemployment_percent, unemployment[i,j])
+  }
+}
+agg_countries = cbind(agg_countries, unemployment_percent)
+```
+
+# Final data set
+
+```{r}
+write.csv(agg_countries, file='final_data.csv')#writing the data set to be saved
+head(agg_countries)#there aren't many rows for observations so we can view the whole thing
+summary(agg_countries)
+
+#using histograms to get a brief insight on distributions
+for (i in 3:ncol(agg_countries)){
+  hist(agg_countries[,i], main = colnames(agg_countries[i]),
+       xlab = colnames(agg_countries[i]))
+}
+```
+
+Most of these factors are skewed to the right which makes sense due to the timeframe we are looking at. Between the years of 2005-2009 there were likely few armed conflicts, and between 2010-2012 there were significantly more armed conflicts.
+
+Therefore we should look at distributions by year, specifically the years with lots of protests.
+
+```{r}
+# relevant_years = 2005:2012
+# for (years in relevant_years){
+#   temp = subset(agg_countries, year == years)
+#   for (i in 3:ncol(temp)){
+#     hist(temp[,i], main = paste(colnames(temp[i]), " year: ", years), xlab = colnames(temp[i]))
+#   }
+# }
+```
+
+I have the above code commented out because it prints off a ton of histograms. If you are interested in the distributions by year you can uncomment them. The main takeaway is that looking at events by years reduces the skewness of the distribution significantly.
+
+Looking only at total events since the above code prints off too many histograms.
+```{r}
+relevant_years = 2005:2012
+for (years in relevant_years){
+  temp = subset(agg_countries, year == years)
+  hist(temp$total_events, main = paste("total event distribution, year: ", years))
+}
+```
+
+looking at the distribution total events by country.
+```{r}
+for (countries in unique(agg_countries$country)){
+  temp = subset(agg_countries, country == countries)
+  hist(temp$total_events, main = paste("total event distribution, country: ", countries))
+}
+```
+
+# Conclusion
+
+Even after looking at the distributions by country and by year there seems to still be some right skew to our event data however it is much less drastic when we take this closer look. Our factor data is much more promising being mostly normally distributed.
